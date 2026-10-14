@@ -1,61 +1,86 @@
 ---
 name: code-generation
-description: Write production-oriented source at FileMap targets, matching the reference repo's conventions in the detected language.
+description: Write or repair production source, config and registrations at FileMap targets -- reusing existing logic where the solution says so, in the reference's conventions, runnable on the job's Python version, verified before reporting.
 ---
 
 # code-generation
 
-> Write production-oriented source at FileMap targets, matching the reference repo's conventions in the detected language.
+> Write or repair production source, config and registrations at FileMap targets -- reusing existing logic where the solution says so, in the reference's conventions, runnable on the job's Python version, verified before reporting.
 
-### Procedure
-1. Read `FileMap.json`, `Implementation-Spec.json`, `Solution-In-Memory.json`, and the repo profile.
-2. Write each source file at its FileMap `targetPath`, in the DETECTED language, FOLLOWING the reference's
-   structure, config-resolution, logging and exception CONVENTIONS -- but with content, names and values
-   from the solution, not copied from the sibling.
-3. Write your report JSON at its EXACT canonical name -- ScaffoldAgent -> `Scaffold.json`, CoreImplementationAgent -> `Core-Implementation.json`, IntegrationImplementationAgent -> `Integration-Implementation.json`, CodeFixAgent -> `Fix-Report.json` (never a `*-report.json` variant) -- listing the files you wrote and any deviations.
+### Inputs
+`20-spec/FileMap.json`, `Implementation-Spec.json`, `Solution-In-Memory.json`,
+`10-analysis/Repo-Profile.json`, `Standards-Checklist.json`, `00-inputs/Coding-Standards.json`, and
+`30-gaps/Gap-Resolutions.json` when it exists.
+
+### Procedure (generation)
+1. Take the FileMap entries your prompt assigns you (Scaffold: structure, config, properties, setup,
+   registrations; Core: business logic; Integration: sources, sinks and clients).
+2. `action: create` -> write the file at its ABSOLUTE `targetPath`.
+   `action: modify` -> make the MINIMAL in-place edit described in `change`. Preserve every existing
+   behaviour, import and test; never reformat or reorder an existing file.
+3. `reuses` / SIM `realisation: reuse` -> import and CALL the existing `reuseTarget`. Never copy it,
+   re-implement it, or create a parallel module for it.
+4. Values: every limit, threshold, path, enum and market id comes from Solution-In-Memory and lives in
+   config/constants (standards forbid magic literals). Add constants to the component's existing
+   constants module; do not hardcode them in the class.
+5. Verify (below), then write your report.
 
 ### Follow the reference's CONVENTIONS; take the CONTENT from the solution
-The reference/sibling teaches you HOW to shape code; the solution design + spec decide WHAT the code is.
-Keep the two strictly separate.
+Study the files in `Repo-Profile.referenceFiles` and the `siblingVariant` only to LEARN shape: class
+pattern (e.g. a `@dataclass` with the same lifecycle methods), config JSON schema, `.properties`
+section headers exactly as found, key casing, per-env file set, logging/exception helpers, sub-package
+nesting. Do NOT copy the sibling's values, business logic or names. Never write the reference's or
+sibling's name or domain into a new file -- not even in a docstring or comment ("mirrors the X
+aggregator" is a defect).
 
-STUDY the sibling files named in `Repo-Profile.referenceFiles` only to LEARN its conventions, then
-GENERATE fresh code for THIS component from `Solution-In-Memory.json` + the spec, expressed in those
-conventions. Conventions to follow: config section style (e.g. grouping config under a section such as `[ssm]` -- the actual section names are READ FROM THE SIBLING AT RUNTIME, never assumed),
-array-vs-scalar SHAPE for a kind of value (an ARN list is an array -- e.g. `source-arn`), structured
-blocks like `vpc-config` and their sub-key style, key CASING (kebab stays kebab; never rewrite to
-camelCase), the pattern of nesting a concern in its own sub-package (an OAuth concern lives in an
-`oauth/`-style sub-package), and where tests live relative to the component root.
+### Runtime correctness
+- Target `Repo-Profile.pythonVersion` (e.g. 3.10 for Glue 4.0). Use no syntax or library API newer than that.
+- Write every regex as a raw string (`r"\w+"`); `"\w"` is a SyntaxWarning now and an error later.
+- Glue: follow `Repo-Profile.jobType`. A `glueetl` entrypoint uses `getResolvedOptions`, `job.init(...)`
+  and `job.commit()`. Don't add `Job()` to a component whose reference does not use it.
+- No credentials, account ids, bucket names or ARNs in source -- use job arguments, config or Secrets
+  Manager, as the reference does.
+- Never edit a dependency manifest (`requirements*.txt`, `pyproject.toml`) unless the solution
+  introduces a new dependency. Changing pins to get an install working is not your call; report it.
 
-DO NOT COPY from the sibling: its file CONTENT, its concrete values (real ARNs, URLs, business logic),
-or its folder/component/package NAMES. This component's names come from the solution + the run's
-component name (never the sibling's name), its files contain only what the solution requires (a concern
-the solution does not need gets no module, even if the sibling has one), and config VALUES are the
-solution's own (or documented placeholders), merely SHAPED the sibling's way. The alignment check verifies
-the code matches the SOLUTION in the reference's conventions -- not that it resembles the sibling.
+### Verify before reporting
+- `<python> -m py_compile` on every Python file you wrote or edited, where `<python>` is the
+  interpreter matching `Repo-Profile.pythonVersion` (`python3.10`, or the validation venv when it exists).
+- Run the tests for the units you touched from `Repo-Profile.tests.importRoot`
+  (`<python> -m pytest <test files> -q`) when the environment allows it. Record the command and the result.
+- Confirm on disk (`test -f`) that every file you claim to have written exists at its absolute path.
 
-### Config by convention (placement + section style from the sibling, VALUES from the solution)
-Write config where the skeleton says and in the sibling's format: env setup as `<env>_setup.json` at the
-OUTER dir, and `.properties` in the INNER `properties/` sub-package using the sibling's EXACT section
-headers as found IN THE SIBLING AT RUNTIME (for example `[ssm]`) -- do not assume or hardcode a set of
-sections, and never invent one the sibling does not have. The section STYLE and file
-placement come from the sibling; the VALUES are the solution's own (or documented placeholders).
+### Repair mode (CodeFixAgent)
+1. Read `50-validation/Validation-Result.json` FIRST and triage per `validation-and-coverage`.
+   Environment failures (install failed, wrong interpreter, missing third-party module) are NOT code
+   defects: record them and do not change code because of them.
+2. Read the previous `Fix-Report.json` (if any) before acting. Do not undo an earlier repair unless the
+   current deviation cites a HIGHER authority than the one the earlier repair cited; if two deviations
+   conflict, repair neither and record the conflict.
+3. Repair in order: missing files / structure -> missing SIM rules (`new-code` first, then `reuse`
+   wiring) -> standards -> tests and coverage.
+4. A deviation that asks for code for an `operational` or `verifiableIn: none` item is not repairable
+   in code: record it as `notRepairable` with the reason.
+5. Never weaken, skip or delete a test, and never exclude files from coverage, to get a pass.
 
-### Rules
-- Hardcode no language or domain literal that belongs in configuration.
-- Docstrings/comments explain WHY: known data quirks, production observations, source-document
-  disagreements, intentional design decisions.
-- Introduce nothing the spec does not define -- no new field, type, service, persistence or auth mechanism.
-- When fixing: repair the implementation to satisfy tests and recorded deviations; NEVER weaken, skip or
-  delete a test to make the suite pass.
+### Report
+Write the canonical report: ScaffoldAgent -> `Scaffold.json`, CoreImplementationAgent ->
+`Core-Implementation.json`, IntegrationImplementationAgent -> `Integration-Implementation.json`,
+CodeFixAgent -> `50-validation/Fix-Report.json`. Payload:
+`{ "filesWritten": [{ "path": "<repo-relative>", "action": "create|modify", "implements": [ids],
+"pathSource": "1|2|3" }], "reuse": [{ "id", "target" }], "verification": [{ "command", "exit",
+"summary" }], "deviationsAddressed": [{ "id", "action" }], "notRepairable": [{ "id", "reason" }],
+"environmentBlockers": [...], "conflicts": [...] }`.
 
 ## Output envelope (every skill shares this)
 
-Write exactly ONE JSON file to the absolute path your manager/prompt gave you, inside your stage folder. The file MUST have this shape:
+Write exactly ONE report JSON at its canonical name inside your stage folder, using an ABSOLUTE path
+(`<RUN ROOT>/<stage>/<CanonicalName>.json`). The file MUST have this shape:
 
 ```json
 {
   "schemaVersion": "1.0",
-  "stage": "<00-inputs|10-analysis|20-spec|40-codegen|50-validation>",
+  "stage": "<00-inputs|10-analysis|20-spec|30-gaps|40-codegen|50-validation|90-summary>",
   "agent": "<your name>",
   "status": "OK | PARTIAL | BLOCKED | SKIPPED",
   "outputPath": "<the absolute path of this file>",
@@ -63,6 +88,12 @@ Write exactly ONE JSON file to the absolute path your manager/prompt gave you, i
 }
 ```
 
-- `OK` = complete. `PARTIAL` = produced but with recorded gaps. `BLOCKED` = a required skill/tool/input was missing (say which). `SKIPPED` = nothing to do (an absent optional input).
-- Put the real CONTENT in `payload`, never a status echo. Push bulky raw output to `logs/<stage>/`.
-- Read only files an upstream stage wrote. Never pass data in memory. Never write outside your stage folder.
+- `OK` = complete. `PARTIAL` = produced but with recorded gaps. `BLOCKED` = a required skill/tool/input
+  was missing (say exactly which). `SKIPPED` = nothing to do (an absent optional input).
+- Put the real CONTENT in `payload`, never a status echo. Push bulky raw output to `<RUN ROOT>/logs/<stage>/`.
+- Read only files an upstream stage wrote. Never pass data in memory.
+- Write boundaries: your report goes ONLY in your own stage folder. Agents that generate code
+  (Scaffold, CoreImplementation, IntegrationImplementation, TestAuthoring, CodeFix) ALSO write source,
+  config and test files -- but only inside the repo, under `Repo-Profile.componentPath` or at a path the
+  FileMap names, never under RUN ROOT. Exception: `Stage-Verdict.json` uses its own flat shape (see
+  `stage-verdict`).
