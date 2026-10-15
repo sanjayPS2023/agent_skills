@@ -16,17 +16,24 @@ You run last in your stage. Judge only what is on disk.
 3. Write `<RUN ROOT>/<stage>/Stage-Verdict.json`.
 
 ### Stage checks
-- 00-inputs: Solution-Model captured with its tables and rules; Jira-Model has every requested key or a
-  recorded fetch error; Coding-Standards transcribed; Reference-Repo-Ref has a real `componentPath`;
-  Solution-Capture-Alignment is `ALIGNED` or every deviation is recorded as a gap.
+- 00-inputs (InputValidationAgent, which runs AFTER the solution-capture loop):
+  `Run-Inputs.json` exists; Solution-Model captured with its tables and rules (or `SKIPPED` because no
+  page was given -- then FAIL only if `serviceAction` and the Jira ACs give nothing to build);
+  Jira-Model has every requested key or a recorded fetch error; Coding-Standards transcribed when
+  `codingStandardsFile` is set (a supplied but unreadable file is FAIL); Reference-Repo-Ref has a real
+  `componentPath` that exists on disk (`test -d`); Solution-Capture-Alignment is `ALIGNED`, or every
+  remaining deviation is recorded as a gap in Solution-Model.
+  A fetch failure for a PRESENT required input is FAIL; an ABSENT optional input is never FAIL.
 - 10-analysis: every requirement file present with ids and a `source` for each; Standards-Checklist has
-  severities and a numeric-or-null `coverageMin`; Repo-Profile has `mode`, `componentPath`,
-  `glueVersion`, `pythonVersion`, `tests.testCommand`, a non-empty `envFiles`, and `extensionPoints`
-  when `mode = extend`.
+  severities and a numeric-or-null `coverageMin`; Repo-Profile has `mode` (consistent with
+  `Run-Inputs.serviceAction`), `componentPath` (exists), `glueVersion`, `pythonVersion`,
+  `tests.importRoot`, `tests.testCommand`, a non-empty `envFiles`, `extensionPoints` when `mode` is
+  `extend` or `update`, and `skeleton` when `mode` is `create`.
 - 20-spec (SpecValidationAgent, after the assembly described in `implementation-spec`): every SIM item
   has a `realisation`; every non-operational item traces to at least one FileMap unit; every environment
   and every needed extension point has an entry; every created source unit has a test target; no
-  path has an extra prefix, a wrong level or a sibling name.
+  path has an extra prefix, a wrong level or a reference/sibling name; `Validation-Plan.json` exists with
+  absolute `componentDir` and `importRoot` and a `pythonVersion`.
 - 40-codegen: written by the gate SCRIPT, never by an agent.
 
 ### Produce
