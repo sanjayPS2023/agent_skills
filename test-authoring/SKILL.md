@@ -35,6 +35,19 @@ description: Author offline, runnable pytest tests for every generated unit in t
   all external boundaries mocked.
 - Name each test or its docstring after the SIM ids it covers (e.g. `test_br_price_min_rejects_998`).
 
+### Glue code under test
+- Test the pure transform functions directly with small in-memory data. Use a local SparkSession
+  fixture (`SparkSession.builder.master("local[1]")`, session-scoped) only when the reference tests do or
+  the unit genuinely needs DataFrame semantics; otherwise test record-level helpers without Spark.
+- Never import `awsglue` for real. Test the entrypoint by patching `getResolvedOptions`, `GlueContext`
+  and `Job` (or the reference's own stub in `conftest.py`) and asserting the transform and writer are
+  called with the configured arguments, and that `job.commit()` runs on success only.
+
+### Update mode
+- Add tests for every `changeType: change|remove` item that prove the NEW behaviour.
+- Modify an existing test only through a FileMap `modify` entry of kind `test`, and only the assertions
+  its SIM item changes; leave every other legacy test untouched -- they are the regression net.
+
 ### Must run offline on the job's runtime
 - No network, no real AWS: patch boto3/S3, HTTP, Elasticsearch, Magento and SNS clients the way the
   reference tests do (moto, `mock.patch`). No sleeps; freeze time where the logic uses it.
@@ -43,7 +56,8 @@ description: Author offline, runnable pytest tests for every generated unit in t
   if the reference has no such stub and the code imports it.
 
 ### Verify
-From `Repo-Profile.tests.importRoot`, using the interpreter for `pythonVersion`:
+From `Validation-Plan.importRoot` (else `Repo-Profile.tests.importRoot`), using
+`<run dir>/.venv-glue/bin/python` when it exists, else the interpreter for `pythonVersion`:
 `<python> -m pytest <your test files> -q` and
 `<python> -m coverage run --include=<generated non-test files> -m pytest <your test files> -q && <python> -m coverage report`.
 - Coverage is measured on the GENERATED and MODIFIED non-test files only; target `coverageMin`
