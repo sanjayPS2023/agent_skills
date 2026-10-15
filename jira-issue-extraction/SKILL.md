@@ -8,7 +8,7 @@ description: Fetch each Jira issue via the Jira MCP tool and capture its descrip
 > Fetch each Jira issue via the Jira MCP tool and capture its description,comments , acceptance criteria (with stable AC ids) and attachments as the definition of done.
 
 ### Procedure
-1. For each key, in the order given, call the Jira tool available in this session (e.g. `jira_get_issue`;
+1. Take the keys from `Run-Inputs.jiraIssueKeys`. For each key, in the order given, call the Jira tool available in this session (e.g. `jira_get_issue`;
    use the real listed name).
 2. Capture summary, description, status, labels, attachments (id, filename) and acceptance criteria, all
    VERBATIM.
