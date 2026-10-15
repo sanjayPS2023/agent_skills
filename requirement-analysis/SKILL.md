@@ -24,6 +24,9 @@ or extra copy.
 Payload: `requirements: [{ "id", "statement", "source", "acceptance", "verifiableIn" }]`.
 - `source` cites the solution section, Jira AC or instruction it came from.
 - `acceptance` says how it will be checked against generated code or config.
+- Technical requirements for a Glue job include the runtime (Glue/Python/Spark version), job
+  arguments, sources/targets, formats, partitioning, write mode, scheduling, retries/timeouts and
+  worker sizing the inputs state; tag each with `verifiableIn` accordingly.
 - `verifiableIn` is one of `code`, `config`, `test`, `infra` (job definition/IaC) or `operational`
   (monitoring, paging or dashboards outside the job). Only `code`/`config`/`test`/`infra` items can be
   checked by the alignment step; `operational` items are recorded but never become code deviations.
@@ -31,7 +34,10 @@ Payload: `requirements: [{ "id", "statement", "source", "acceptance", "verifiabl
   transformation, required).
 
 ### Coding standards capture (CodingStandardsAgent)
-Transcribe the staged standards document (`00-inputs/source/`) into
+Read the staged standards document at `Run-Inputs.codingStandardsFile` (the user's ETL Coding Standards
+`.md`, copied to `00-inputs/source/ETL-Coding-Standards.md`). If it is `null`, write `SKIPPED` with an
+empty `standards` list -- later stages then rely on `glue-job-design` and the reference. Otherwise
+transcribe it into
 `standards: [{ "id", "category", "rule", "text", "severity": "MANDATORY"|"RECOMMENDED", "section" }]`,
 with `text` VERBATIM. Words such as MUST / SHALL / REQUIRED mean MANDATORY; SHOULD / RECOMMENDED mean
 RECOMMENDED. Record any numeric threshold the document states (coverage %, line length, timeouts) under
