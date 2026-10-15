@@ -23,7 +23,7 @@ cannot add behaviour the solution and Jira do not support -- record such a reque
 - `raw`: the original text, verbatim.
 
 ### Rules
-`NA`, empty, null or unresolved `{{template}}` text = ABSENT -> `SKIPPED`, with no invented scope.
+Read the text from `Run-Inputs.additionalInformation`. `NA`, empty, null or unresolved `{{template}}` text = ABSENT -> `SKIPPED`, with no invented scope.
 Quote; do not paraphrase into broader scope.
 
 ## Output envelope (every skill shares this)
