@@ -33,7 +33,9 @@ resolution names as authoritative (e.g. an attached feed or XSD).
   standards failure.
 - Where an expected value depends on a reusable pure helper, write "derive via <helper>" rather than a
   literal that can drift from the implementation.
-- Keep fixtures small and anonymised (fake VINs, no real customer data).
+- For Glue transforms, prefer small row lists (JSON lines / CSV) that a test turns into a DataFrame with
+  the declared schema, plus one fixture per source schema variant the solution lists.
+- Keep fixtures small and anonymised (fake ids, no real customer data, no credentials or real buckets).
 
 ## Output envelope (every skill shares this)
 
