@@ -8,7 +8,8 @@ description: Fetch a Confluence page (and its referenced attachments) by id or U
 > Fetch a Confluence page (and its referenced attachments) by id or URL via the Confluence MCP tool and hand its full content to the comprehension step.
 
 ### Procedure
-1. Resolve the page id. If you are given a URL, the id is the numeric segment after `/pages/`.
+1. Resolve the page id: `Run-Inputs.solutionDesignPage` already holds it. If you are given a URL instead,
+   the id is the numeric segment after `/pages/` (or the `pageId=` query value).
 2. Fetch the page with the Confluence MCP tool available in this session (e.g. `confluence_get_page`,
    with markdown conversion and metadata ON). Use the tool's real name as listed; do not assume one.
    Actually retrieve the page -- reporting OK for a page you did not fetch is forbidden.
