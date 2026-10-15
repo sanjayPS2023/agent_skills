@@ -1,80 +1,70 @@
 # agent_skills
 
-Skills loaded by the ETL Glue code-generation workflow (`workflow-etl-glue-code-generation-v2-gates-fixed`)
-and its repair loop (`workflow-etl-glue-code-alignment-FIXED`). Every agent loads `workflow-run-contract`
-first, then reads each skill's `SKILL.md` from disk before acting.
+Skills loaded by the **ETL Glue code-generation workflow** (`workflow-etl-glue-code-generation`), its repair
+loop (`workflow-etl-glue-code-alignment`) and nothing else. Every agent loads `workflow-run-contract` first,
+then reads each attached skill's `SKILL.md` from disk before acting.
+
+The workflow creates a NEW Glue service or UPDATES an existing one (in place, or by adding a variant), from a
+Confluence solution design, Jira stories, the ETL coding standards `.md`, a reference ETL service and free-text
+instructions -- see `workflow-run-contract` for the inputs, file layout and authority order.
 
 ## Skill -> agents
 
 | Skill | Used by |
 |---|---|
 | workflow-run-contract | every agent |
-| swarm-orchestration | Input Ingestion Manager, Requirement Analysis Orchestrator, Implementation Spec Manager, Code Generation Manager |
-| confluence-document-extraction | SolutionModelAgent, SolutionCaptureVerifyAgent |
-| solution-document-comprehension | SolutionModelAgent, SolutionCaptureVerifyAgent, SolutionInMemoryAgent |
-| structured-table-extraction | SolutionModelAgent, CodingStandardsAgent, DataMappingRequirementAgent |
-| jira-issue-extraction | JiraModelAgent |
 | additional-instruction-triage | AdditionalInstructionAgent |
-| reference-repo-profiling | ReferenceRepoAgent, RepositoryDiscoveryAgent, Scaffold/Core/IntegrationImplementationAgent |
-| requirement-analysis | Business/Functional/NonFunctional/Technical/DataMapping requirement agents, CodingStandardsAgent, StandardsChecklistAgent |
-| solution-in-memory | SolutionInMemoryAgent |
-| implementation-spec | Infrastructure/Integration/BusinessLogic design agents, **SpecValidationAgent (add -- see below)** |
-| test-fixture-design | TestFixtureAgent |
-| code-generation | Scaffold/Core/IntegrationImplementationAgent, CodeFixAgent |
-| test-authoring | TestAuthoringAgent |
-| validation-and-coverage | CodeFixAgent, **TestAuthoringAgent (add)** |
 | alignment-verification | SolutionCaptureVerifyAgent, CodeSolutionAlignmentAgent |
+| code-generation | ScaffoldAgent, CoreImplementationAgent, IntegrationImplementationAgent, CodeFixAgent |
+| confluence-document-extraction | SolutionModelAgent, SolutionCaptureVerifyAgent |
+| gap-review | Gap Presenter, Gap Resolution Agent |
+| glue-job-design | TechnicalRequirementAgent, RepositoryDiscoveryAgent, InfrastructureDesignAgent, IntegrationDesignAgent, BusinessLogicDesignAgent, SpecValidationAgent, ScaffoldAgent, CoreImplementationAgent, IntegrationImplementationAgent, TestAuthoringAgent, CodeFixAgent, CodeSolutionAlignmentAgent |
+| implementation-spec | InfrastructureDesignAgent, IntegrationDesignAgent, BusinessLogicDesignAgent, SpecValidationAgent, Gap Resolution Agent |
+| jira-issue-extraction | JiraModelAgent |
+| reference-repo-profiling | ReferenceRepoAgent, RepositoryDiscoveryAgent, ScaffoldAgent, CoreImplementationAgent, IntegrationImplementationAgent |
+| requirement-analysis | CodingStandardsAgent, BusinessRequirementAgent, FunctionalRequirementAgent, NonFunctionalRequirementAgent, TechnicalRequirementAgent, DataMappingRequirementAgent, StandardsChecklistAgent |
+| solution-document-comprehension | SolutionModelAgent, SolutionCaptureVerifyAgent, SolutionInMemoryAgent |
+| solution-in-memory | SolutionInMemoryAgent, Gap Resolution Agent |
 | stage-verdict | InputValidationAgent, AnalysisValidationAgent, SpecValidationAgent |
+| structured-table-extraction | SolutionModelAgent, CodingStandardsAgent, SolutionCaptureVerifyAgent, DataMappingRequirementAgent |
+| swarm-orchestration | Input Ingestion Manager, Requirement Analysis Orchestrator, Implementation Spec Manager, Code Generation Manager |
+| test-authoring | TestAuthoringAgent |
+| test-fixture-design | TestFixtureAgent |
+| validation-and-coverage | TestAuthoringAgent, CodeFixAgent |
 
-## Workflow wiring changes these skills expect
+## Changelog -- 2026-10-15 (ETL Glue workflow v1)
 
-1. **SpecValidationAgent** must also load `implementation-spec`. The FileMap/Implementation-Spec assembly
-   rules live there, and today the assembler only loads `stage-verdict`.
-2. **TestAuthoringAgent** should also load `validation-and-coverage` (for the environment-vs-code triage
-   and the coverage scope).
-3. **Run Validation** must run on `Repo-Profile.pythonVersion` (Glue 4.0 -> Python 3.10) in a venv, record
-   `installExit` and `pythonExecutable` in `Validation-Result.json`, set `BLOCKED` when the install fails,
-   and measure coverage with `--include=<generated non-test files>`.
-4. **Gate / loop**: stop the Code Alignment Loop on `PASS`, or when Fix-Report says `BLOCKED` with
-   `reason: environment`.
+- NEW `glue-job-design`: Glue runtime/version rules, entrypoint lifecycle, pure transforms vs I/O, job
+  arguments/config/secrets, idempotent writes, partitioning, bookmarks, job definition per environment, and
+  the mechanical review checklist GLUE-01..12 used by alignment.
+- NEW `gap-review`: the Gap Presenter (collect/de-duplicate) and Gap Resolution Agent (apply answers exactly)
+  procedures and schemas, which previously lived only in prompts. Answers can be typed (`GAP-001: ...`) or
+  uploaded.
+- workflow-run-contract: `Run-Inputs.json` (one resolved copy of the form inputs -- reference ETL service,
+  service action CREATE/UPDATE/AUTO, target Glue service, staged coding standards); explicit writer per
+  canonical file; new files `Validation-Plan.json`, `Baseline-Tests.json`, `Gaps-For-Review.md`,
+  `Loop-Stop.json`, rollups `Spec-Manifest.json` / `Codegen-Manifest.json`; the create/extend/update mode
+  rule; Glue rules in the authority order; a secrets rule.
+- reference-repo-profiling: reference vs TARGET service; `update` mode; mode constrained by the user's
+  service action; job-definition conventions; extension points for update mode.
+- solution-in-memory: `changeType`, `currentBehaviour`, `preserved` (PRS-*) items, Glue `jobParameters`
+  (JOB-*) and `dataContracts` (DATA-*).
+- implementation-spec: `update` placement; `job-definition` kind; fixtures merged into the FileMap;
+  `Validation-Plan.json` assembly so the validation scripts never guess paths.
+- code-generation / test-authoring: update-mode rules (backward compatibility, preserved behaviour, legacy
+  tests touched only through a FileMap entry); Glue entrypoint/transform testability; the shared venv.
+- validation-and-coverage: matches the new Run Validation script -- one pytest run, regressions vs the
+  pre-change baseline, pre-existing failures, tool availability, coverage scope.
+- alignment-verification: regression and Glue-runtime deviation kinds; update-mode judging; target name is
+  not a "reference name leak".
+- stage-verdict: 00-inputs verdict now runs AFTER the solution-capture loop (it used to judge a file not yet
+  written); mode/importRoot/Validation-Plan checks.
+- swarm-orchestration: real dependency order for the Glue pipeline; resume via `_run/gate-decisions.json`.
 
-## Changelog -- 2026-10-14 (from the r5 DCSNet run)
+## Workflow wiring these skills expect (all done in the Glue workflow)
 
-- workflow-run-contract: RUN ROOT = the `workflow_output` folder itself (the old text said it *contains*
-  `workflow_output/`, the exact confusion that sent agents to wrong paths); added `30-gaps`, the full
-  canonical file table with owners (`Coding-Standards`, `Data-Mapping-Requirements`, `Standards-Checklist`,
-  `Static-Checks`, gap files); removed the never-written `Toolchain-Profile.json`; added the authority
-  order, absolute-path discipline and the source-code write boundary.
-- reference-repo-profiling: removed "there is no separate standards document" (it contradicted the ETL
-  Coding Standards input); added create/extend `mode`, top-level `glueVersion`/`pythonVersion`/
-  `sparkVersion` (the validation script reads `glueVersion` at the top level; r5 had it nested), the
-  test command and import root, the complete `envFiles`, and `extensionPoints`; replaced the Lambda examples.
-- requirement-analysis: now covers the Data-Mapping, Coding-Standards and Standards-Checklist outputs
-  (previously "write only one of the four requirement files", which contradicted those agents);
-  `coverageMin` is required (r5 had `null`); `verifiableIn`; standards apply only to new/modified files.
-- solution-in-memory: stable ids plus `realisation` (reuse / new-code / config / infra / operational) with
-  `reuseTarget`; gap resolutions applied. Fixes r5's DEV-001..010/026..032, which demanded
-  re-implementation of logic the solution said to reuse.
-- implementation-spec: FileMap entries now carry `kind`, `action` (create/modify), `implements` and
-  `reuses`; per-env, registration, config and fixture entries are mandatory; extend mode is supported;
-  the assembly rules are explicit. (r5's FileMap had 2 entries, so setup/properties/init/fixture files
-  were "missing" on every iteration.)
-- code-generation: reuse-by-delegation; modify-in-place for registrations; target Python version; raw-string
-  regexes (r5 static.log warnings); no manifest edits; verify with py_compile plus pytest; repair mode
-  triages the environment first, reads the previous Fix-Report, and never undoes a repair without a
-  higher authority (r5 created and then deleted `DCSNetProcessRule.py`, and added and then removed
-  `cache.invalidate`).
-- test-authoring: offline and mocked, on the runtime Python; creates every fixture it opens (r5 DEV-024/034);
-  asserts each SIM id; wiring tests for reused logic; coverage measured on generated files; runs the tests itself.
-- validation-and-coverage (was missing from this repo): full triage table (install failure, wrong
-  interpreter, pytest exit 2 = zero tests ran), environment vs code vs pre-existing classification,
-  coverage scope, re-verification, and a `BLOCKED: environment` exit for the loop.
-- alignment-verification: output schema now matches the workflow prompt; reuse-aware; disk evidence
-  required for "missing" (r5 DEV-013 flagged a file that existed); one deviation per rule and file with
-  no contradictions (r5 DEV-015 vs DEV-016); stable ids, carrying forward the previous result;
-  `operational` items never block.
-- stage-verdict: flat file (no envelope) made explicit; stage-specific checks added.
-- test-fixture-design (was missing from this repo): concrete paths, built from authoritative samples.
-- swarm-orchestration, additional-instruction-triage, confluence, jira, solution-document-comprehension,
-  structured-table-extraction: real dependency order; tool names not hardcoded; attachments; stable AC
-  ids; "already implemented" markers preserved.
+1. SpecValidationAgent loads `implementation-spec`; TestAuthoringAgent loads `validation-and-coverage`.
+2. Run Validation runs on `Validation-Plan.pythonVersion` in `<run dir>/.venv-glue`, records `installExit`,
+   `pythonExecutable`, `toolsAvailable`; coverage uses `--include=<generated/modified non-test files>`.
+3. The Code Alignment Loop no-ops after `PASS`, or after `Loop-Stop.json` (written when Fix-Report says
+   `BLOCKED` with `reason: environment`).
