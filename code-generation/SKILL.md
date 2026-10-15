@@ -14,7 +14,8 @@ description: Write or repair production source, config and registrations at File
 
 ### Procedure (generation)
 1. Take the FileMap entries your prompt assigns you (Scaffold: structure, config, properties, setup,
-   registrations; Core: business logic; Integration: sources, sinks and clients).
+   job definition, the entrypoint shell and registrations; Core: transforms and business logic;
+   Integration: readers, writers, catalog/connection access and clients). Read `glue-job-design` first.
 2. `action: create` -> write the file at its ABSOLUTE `targetPath`.
    `action: modify` -> make the MINIMAL in-place edit described in `change`. Preserve every existing
    behaviour, import and test; never reformat or reorder an existing file.
@@ -33,25 +34,40 @@ nesting. Do NOT copy the sibling's values, business logic or names. Never write 
 sibling's name or domain into a new file -- not even in a docstring or comment ("mirrors the X
 aggregator" is a defect).
 
+### Update mode (`Repo-Profile.mode = update`)
+- You are changing a live service. Edit only what a FileMap `modify` entry's `change` names; keep every
+  `PRS-*` (preserved) behaviour from Solution-In-Memory intact.
+- Keep existing job arguments, config keys and public function signatures backward compatible unless a
+  SIM item explicitly changes them; when one does, update every caller and every env file in the same run.
+- Never rename, move or reformat existing files; never delete code the SIM does not remove.
+- An existing test changes only through a FileMap `modify` entry of kind `test`, and only the assertions
+  its cited SIM item changes.
+
 ### Runtime correctness
 - Target `Repo-Profile.pythonVersion` (e.g. 3.10 for Glue 4.0). Use no syntax or library API newer than that.
 - Write every regex as a raw string (`r"\w+"`); `"\w"` is a SyntaxWarning now and an error later.
-- Glue: follow `Repo-Profile.jobType`. A `glueetl` entrypoint uses `getResolvedOptions`, `job.init(...)`
-  and `job.commit()`. Don't add `Job()` to a component whose reference does not use it.
+- Glue: follow `Repo-Profile.jobType` and `glue-job-design`. A `glueetl` entrypoint uses
+  `getResolvedOptions`, `job.init(...)` and `job.commit()`. Don't add `Job()` to a component whose
+  reference does not use it. Keep transforms as pure functions of DataFrames/records, importable without
+  `awsglue`, so tests run without a Glue runtime.
 - No credentials, account ids, bucket names or ARNs in source -- use job arguments, config or Secrets
   Manager, as the reference does.
 - Never edit a dependency manifest (`requirements*.txt`, `pyproject.toml`) unless the solution
   introduces a new dependency. Changing pins to get an install working is not your call; report it.
 
 ### Verify before reporting
-- `<python> -m py_compile` on every Python file you wrote or edited, where `<python>` is the
-  interpreter matching `Repo-Profile.pythonVersion` (`python3.10`, or the validation venv when it exists).
+- `<python> -m py_compile` on every Python file you wrote or edited, where `<python>` is
+  `Validation-Result.pythonExecutable` when it exists, else `<run dir>/.venv-glue/bin/python` when it
+  exists (the Baseline Tests script builds it on `Repo-Profile.pythonVersion`), else `python3.10` (or the
+  version the profile names). `<run dir>` is the parent of RUN ROOT.
 - Run the tests for the units you touched from `Repo-Profile.tests.importRoot`
   (`<python> -m pytest <test files> -q`) when the environment allows it. Record the command and the result.
 - Confirm on disk (`test -f`) that every file you claim to have written exists at its absolute path.
 
 ### Repair mode (CodeFixAgent)
-1. Read `50-validation/Validation-Result.json` FIRST and triage per `validation-and-coverage`.
+1. Read `50-validation/Validation-Result.json`, `Static-Checks.json` and `Coverage.json` FIRST and
+   triage per `validation-and-coverage` (generated-test failures, regressions against
+   `40-codegen/Baseline-Tests.json`, static errors, coverage).
    Environment failures (install failed, wrong interpreter, missing third-party module) are NOT code
    defects: record them and do not change code because of them.
 2. Read the previous `Fix-Report.json` (if any) before acting. Do not undo an earlier repair unless the
