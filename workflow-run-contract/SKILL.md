@@ -1,11 +1,11 @@
 ---
 name: workflow-run-contract
-description: The run contract every agent obeys -- run-root resolution, the on-disk stage layout and canonical filenames, the authority order, write boundaries, and the JSON status envelope.
+description: The run contract every agent obeys -- run-root resolution, the on-disk stage layout and canonical filenames, the run inputs, the authority order, write boundaries, and the JSON status envelope.
 ---
 
 # workflow-run-contract
 
-> The run contract every agent obeys -- run-root resolution, the on-disk stage layout and canonical filenames, the authority order, write boundaries, and the JSON status envelope.
+> The run contract every agent obeys -- run-root resolution, the on-disk stage layout and canonical filenames, the run inputs, the authority order, write boundaries, and the JSON status envelope.
 
 This is the base skill every agent loads first. It defines HOW agents cooperate; task skills define WHAT
 each one produces.
@@ -30,18 +30,37 @@ Repo-relative paths in reports are relative to that repo root. Always READ and W
 your shell's working directory is NOT the repo, so a relative write lands outside it and the file is
 silently lost from the manifest, the tests and the commit.
 
+### Run inputs (read them from ONE file)
+The `Resolve Run Inputs` script writes `<RUN ROOT>/00-inputs/Run-Inputs.json` before any agent runs. It
+is the single, already-resolved copy of what the user typed, whichever form (Create or Resume) they used.
+Read inputs from it -- never from raw `{{...}}` template text. Its `payload`:
+
+| Key | Meaning |
+|---|---|
+| `solutionDesignPage` | Confluence page id (already extracted from a URL), or `null` |
+| `jiraIssueKeys` | list of Jira keys (the story/stories), possibly empty |
+| `sourceBranch` | Bitbucket branch that was cloned (default `stream19-qa`); never written to |
+| `referenceEtlService` | the existing ETL/Glue service to take CONVENTIONS from (name or repo-relative path), or `null` -> take it from the solution design |
+| `serviceAction` | `CREATE` (new Glue service), `UPDATE` (change an existing Glue service), or `AUTO` (decide from the solution design) |
+| `targetGlueService` | UPDATE: the existing service to change. CREATE: the new service's name. `null` -> from the solution |
+| `codingStandardsFile` | ABSOLUTE path of the staged ETL coding standards (`00-inputs/source/ETL-Coding-Standards.md`), or `null` |
+| `additionalInformation` | free text, or `null` |
+| `runKind` | `CREATE_RUN` (fresh pipeline) or `RESUME_RUN` (stages with a PASS verdict were restored and may be skipped) |
+
+`null` means ABSENT. Never re-derive a value the file already holds.
+
 ### Stage layout
 ```
 <RUN ROOT>/
-  _run/           run-manifest.json, resume-plan.json (derived indexes, never the authority)
-  00-inputs/      captured inputs + the staged coding standards (source/)
+  _run/           run-manifest.json, gate-decisions.json (script-owned indexes, never the authority)
+  00-inputs/      captured inputs; source/ holds the staged coding standards and fetched attachments
   10-analysis/    requirement slices, standards checklist, repo profile
-  20-spec/        solution-in-memory, designs, FileMap, implementation spec, test fixtures
+  20-spec/        solution-in-memory, designs, FileMap, implementation spec, validation plan, fixtures
   30-gaps/        gaps for human review and the reviewer's resolutions
-  40-codegen/     generation reports, generated-files manifest, stage verdict
+  40-codegen/     generation reports, baseline test result, generated-files manifest, stage verdict
   50-validation/  validation/coverage/static results (scripts), alignment result, fix report
   90-summary/     run summary
-  logs/<stage>/   raw command output (install.log, test.log, coverage.json, ...)
+  logs/<stage>/   raw command output (install.log, test.log, coverage.json, junit.xml, ...)
 ```
 Init Run Workspace creates every folder before any agent runs.
 
@@ -51,34 +70,61 @@ absent under its canonical name, it does not exist -- do not fall back to a simi
 
 | Folder | File | Written by |
 |---|---|---|
+| 00-inputs | `Run-Inputs.json` | Resolve Run Inputs SCRIPT |
 | 00-inputs | `Solution-Model.json` | SolutionModelAgent |
 | 00-inputs | `Jira-Model.json` | JiraModelAgent |
 | 00-inputs | `Additional-Instruction.json` | AdditionalInstructionAgent |
 | 00-inputs | `Coding-Standards.json` | CodingStandardsAgent |
 | 00-inputs | `Reference-Repo-Ref.json` | ReferenceRepoAgent |
+| 00-inputs | `Input-Manifest.json` | Input Ingestion Manager (rollup) |
 | 00-inputs | `Solution-Capture-Alignment.json` | SolutionCaptureVerifyAgent |
-| 00-inputs | `Input-Manifest.json` | Input Ingestion Manager |
-| 10-analysis | `Business-Requirements.json`, `Functional-Requirements.json`, `NonFunctional-Requirements.json`, `Technical-Requirements.json`, `Data-Mapping-Requirements.json` | one requirement agent each |
+| 10-analysis | `Business-Requirements.json` | BusinessRequirementAgent |
+| 10-analysis | `Functional-Requirements.json` | FunctionalRequirementAgent |
+| 10-analysis | `NonFunctional-Requirements.json` | NonFunctionalRequirementAgent |
+| 10-analysis | `Technical-Requirements.json` | TechnicalRequirementAgent |
+| 10-analysis | `Data-Mapping-Requirements.json` | DataMappingRequirementAgent |
 | 10-analysis | `Standards-Checklist.json` | StandardsChecklistAgent |
 | 10-analysis | `Repo-Profile.json` | RepositoryDiscoveryAgent |
-| 10-analysis | `Analysis.json` | Requirement Analysis Orchestrator |
+| 10-analysis | `Analysis.json` | Requirement Analysis Orchestrator (rollup) |
 | 20-spec | `Solution-In-Memory.json` | SolutionInMemoryAgent |
-| 20-spec | `Infrastructure-Design.json`, `Integration-Design.json`, `BusinessLogic-Design.json` | one designer each (parallel) |
+| 20-spec | `Infrastructure-Design.json` | InfrastructureDesignAgent (parallel) |
+| 20-spec | `Integration-Design.json` | IntegrationDesignAgent (parallel) |
+| 20-spec | `BusinessLogic-Design.json` | BusinessLogicDesignAgent (parallel) |
 | 20-spec | `Test-Fixtures.json` | TestFixtureAgent |
-| 20-spec | `FileMap.json`, `Implementation-Spec.json` | SpecValidationAgent (serial assembler) |
+| 20-spec | `FileMap.json`, `Implementation-Spec.json`, `Validation-Plan.json` | SpecValidationAgent (serial assembler) |
+| 20-spec | `Spec-Manifest.json` | Implementation Spec Manager (rollup) |
 | 30-gaps | `Gaps-For-Review.json` | Gap Presenter |
+| 30-gaps | `Gaps-For-Review.md` | Publish Gap File SCRIPT |
 | 30-gaps | `Gap-Resolutions.json` | Gap Resolution Agent |
-| 40-codegen | `Scaffold.json`, `Core-Implementation.json`, `Integration-Implementation.json`, `Tests.json` | one generator each |
+| 40-codegen | `Baseline-Tests.json` | Baseline Tests SCRIPT (pre-change test run) |
+| 40-codegen | `Scaffold.json` | ScaffoldAgent |
+| 40-codegen | `Core-Implementation.json` | CoreImplementationAgent |
+| 40-codegen | `Integration-Implementation.json` | IntegrationImplementationAgent |
+| 40-codegen | `Tests.json` | TestAuthoringAgent |
+| 40-codegen | `Codegen-Manifest.json` | Code Generation Manager (rollup) |
 | 40-codegen | `Generated-Files.json` | manifest SCRIPT (derived from git; never hand-written) |
 | 50-validation | `Validation-Result.json`, `Coverage.json`, `Static-Checks.json` | Run Validation SCRIPT |
 | 50-validation | `Alignment-Result.json` | CodeSolutionAlignmentAgent |
 | 50-validation | `Fix-Report.json` | CodeFixAgent |
-| 90-summary | `Run-Summary.json` | Run Summary script |
-| every stage | `Stage-Verdict.json` | that stage's validator (for 40-codegen: the gate SCRIPT) |
+| 50-validation | `Loop-Stop.json` | gate SCRIPT (only when the repair loop must stop early) |
+| 90-summary | `Run-Summary.json` | Run Summary SCRIPT |
+| every stage | `Stage-Verdict.json` | that stage's validator (00-inputs: InputValidationAgent; 10-analysis: AnalysisValidationAgent; 20-spec: SpecValidationAgent; 40-codegen: the gate SCRIPT) |
 
 Parallel writers never share a file; a serial assembler merges their files. Never write a file a
-script owns (`Generated-Files.json`, `Validation-Result.json`, `Coverage.json`, `Static-Checks.json`,
-`40-codegen/Stage-Verdict.json`).
+script owns (`Run-Inputs.json`, `Gaps-For-Review.md`, `Baseline-Tests.json`, `Generated-Files.json`,
+`Validation-Result.json`, `Coverage.json`, `Static-Checks.json`, `Loop-Stop.json`,
+`40-codegen/Stage-Verdict.json`, anything under `_run/`).
+
+### Mode (create / extend / update)
+`Repo-Profile.mode` is decided ONCE, in analysis (see `reference-repo-profiling`), and every later stage
+obeys it:
+- `create` -- a new, separately deployed Glue service, laid out like the reference service.
+- `extend` -- an existing Glue service gains a new variant (source, market, feed, table ...) next to its
+  existing ones; new files inside it plus minimal registrations.
+- `update` -- an existing Glue service's behaviour, schema, config or job definition changes in place.
+`serviceAction = CREATE` forces `create`; `UPDATE` allows only `extend` or `update`; `AUTO` lets the
+solution decide. A solution that contradicts the chosen action is recorded as a gap, never silently
+overridden.
 
 ### Authority order (what wins when sources disagree)
 WHAT to build:
@@ -89,9 +135,10 @@ WHAT to build:
 HOW to build it:
 2. ETL Coding Standards (`Coding-Standards.json` / `Standards-Checklist.json`) -- MANDATORY rules are
    binding; RECOMMENDED rules are warnings.
-3. Reference component conventions (`Repo-Profile.json`) -- layout, naming and shapes where the
-   standards are silent.
-4. Skill defaults.
+3. Glue platform rules (`glue-job-design`) -- correctness of the job on the Glue runtime.
+4. Reference service conventions (`Repo-Profile.json`) -- layout, naming and shapes where the
+   standards are silent. In `update`/`extend` mode the target service's OWN conventions come first.
+5. Skill defaults.
 
 When two sources at the same level disagree, record both readings and the location; do not silently pick.
 
@@ -106,6 +153,11 @@ Each stage ends with `<stage-folder>/Stage-Verdict.json` = `{ "stage", "verdict"
 ### Optional inputs
 An absent optional input is a recorded fact, never a failure: return `OK`/`SKIPPED` with no fabricated
 content. `NA`, empty, null and unresolved `{{template}}` text all mean ABSENT.
+
+### Secrets
+Never write a credential, access key, token, password, account id or real bucket ARN into any file --
+source, config, test, fixture or report. Use job arguments, the reference's config resolution or
+Secrets Manager names. The staging script refuses to commit credential-shaped content.
 
 ## Output envelope (every skill shares this)
 
