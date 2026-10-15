@@ -21,19 +21,28 @@ is not listed here, generation never writes it and alignment then flags it on ev
 Each payload carries the section (modules, classes, functions, data structures, in the DETECTED
 language's idiom; behaviour only, no code) and a `fileMap` array of entries:
 ```json
-{ "unit": "dcsnet-aggregator", "kind": "source|test|config|properties|setup|test-resource",
+{ "unit": "orders-curation-job", "kind": "source|test|config|properties|setup|job-definition|test-resource",
   "action": "create | modify", "targetPath": "<ABSOLUTE>",
   "implements": ["BR-...", "EDGE-..."], "reuses": ["<module.function>"],
   "publicApi": ["..."], "dependsOn": ["..."],
-  "change": "<for modify: the minimal edit, e.g. 'register DCSNet in the aggregator factory'>",
+  "change": "<for modify: the minimal edit, e.g. 'register the new source in the job's source registry'>",
   "test": { "targetPath": "<ABSOLUTE>" } }
 ```
+
+Glue-specific design rules (entrypoint shape, pure transforms vs I/O, job arguments, bookmarks, write
+modes, job definition keys) come from `glue-job-design`; read it before designing.
 
 ### Placing files (read `Repo-Profile.mode`)
 - `extend`: new files go INSIDE `Repo-Profile.componentPath`, at the level where the reference keeps that
   kind of file (e.g. `aggregators/<region>/<market>/<variant>/`). Add one `modify` entry for EVERY
   `Repo-Profile.extensionPoints` entry the new variant needs (factory/init module, constants, entrypoint
   routing, enabled-markets in EACH env `.properties`, ...).
+- `update`: the files listed in `Repo-Profile.extensionPoints` and SIM `currentBehaviour` are `modify`
+  entries with a precise `change` (what to add/alter/remove and where). Create a new file only where the
+  service's own conventions would put a new module for the new behaviour. Every SIM item with
+  `changeType: change|remove` maps to at least one `modify` entry. Existing tests that assert behaviour
+  the SIM changes are `modify` entries of kind `test` (cite the SIM id in `change`); no other existing
+  test is touched.
 - `create`: apply `Repo-Profile.skeleton` with the solution's component name substituted for
   `<COMPONENT>` at every level, rooted at `skeleton.parentPath`; use `fileKindToDir` for the level of
   each kind.
@@ -56,15 +65,32 @@ unit that calls it. Do NOT create a new module that duplicates it. New `source` 
 - Every fixture file a test will open is its own `test-resource` entry under `Repo-Profile.tests.resourcesDir`.
 
 ### ASSEMBLY (SpecValidationAgent only -- serial)
-Read the three `*-Design.json` + `Solution-In-Memory.json` + `Repo-Profile.json`, then write:
-- `FileMap.json`: all entries merged and de-duplicated by `targetPath` (merge their `implements`).
+Read the three `*-Design.json` + `Test-Fixtures.json` + `Solution-In-Memory.json` + `Repo-Profile.json`
++ `Standards-Checklist.json`, then write:
+- `FileMap.json` payload `{ "entries": [...] }`: all design entries merged and de-duplicated by
+  `targetPath` (merge their `implements`), plus one `test-resource` entry per fixture in
+  `Test-Fixtures.json` that has a `targetPath`.
 - `Implementation-Spec.json`: the three sections plus a `traceability` table mapping each SIM id ->
   FileMap units, or -> `operational`.
+- `Validation-Plan.json` -- what the Run Validation and Baseline Tests SCRIPTS execute, so they never
+  guess. Payload (ABSOLUTE paths):
+  ```json
+  { "mode": "create|extend|update",
+    "componentDir": "<create: the NEW service dir; extend/update: Repo-Profile.componentPath>",
+    "importRoot": "<dir pytest runs from: Repo-Profile.tests.importRoot, or for create its equivalent inside the new service>",
+    "pythonVersion": "3.10", "glueVersion": "4.0",
+    "requirementsFiles": ["<governing manifest(s) to pip install; for create the new service's own if the FileMap creates one>"],
+    "suiteTestPaths": ["<extend/update: the existing test dir(s) of the component, for regression runs; create: []>"],
+    "testFiles": ["<every test file in the FileMap (created or modified)>"],
+    "pytestArgs": ["-q"],
+    "coverageMin": <Standards-Checklist.coverageMin, or 80 when null> }
+  ```
 
 Then FAIL the stage (via `stage-verdict`) when:
 - any SIM item with realisation `new-code`/`reuse`/`config`/`infra` maps to no unit;
 - an extension point the mode needs has no `modify` entry;
 - an environment from `envFiles` is missing;
+- (`update`) a SIM item with `changeType: change|remove` has no `modify` entry;
 - a created source unit has no test target;
 - a path has an extra prefix segment, a misplaced level or a sibling name.
 
