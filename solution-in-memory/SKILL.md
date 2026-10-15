@@ -14,12 +14,17 @@ every iteration.
 ### Inputs (in authority order)
 `Solution-Model.json` + `Jira-Model.json` ACs, amended by `30-gaps/Gap-Resolutions.json` when it exists
 (a resolution REPLACES the default it resolves -- cite the gap id) and narrowed by
-`Additional-Instruction.json`. Use `Repo-Profile.json` only to resolve "reuse X" to a real module.
+`Additional-Instruction.json`. Use `Repo-Profile.json` (and its `mode`) only to resolve "reuse X" to a
+real module and, in `update`/`extend` mode, to find the CURRENT behaviour an item changes.
 
 ### Produce
 `Solution-In-Memory.json` payload with these sections:
 - `businessRules` (`BR-*`), `contracts` (`CT-*`), `limits` (`LIM-*`), `formats` (`FMT-*`),
-  `decisions` (`DEC-*`), `edgeCases` (`EDGE-*`), `fieldMappings` (`MAP-*`).
+  `decisions` (`DEC-*`), `edgeCases` (`EDGE-*`), `fieldMappings` (`MAP-*`), and for Glue jobs
+  `jobParameters` (`JOB-*`: job arguments, worker type, timeout, retries, bookmarks, schedule/trigger)
+  and `dataContracts` (`DATA-*`: source/target locations by config key, formats, partition keys,
+  write mode, schema).
+- `preserved` (`PRS-*`, `update`/`extend` mode only): existing behaviour that must not change.
 - `implementationFiles`: `{ "create": [...], "modify": [...], "unchanged": [...] }` with the explicit
   paths or names the solution or Jira state. These have precedence (1) when later stages resolve paths.
 
@@ -29,8 +34,14 @@ Every item has:
   "values": { "minimumPrice": 999 }, "source": "<section / AC / gap id>",
   "realisation": "reuse | new-code | config | infra | operational",
   "reuseTarget": "<module.function in the repo, when realisation=reuse>",
+  "changeType": "add | change | remove",
+  "currentBehaviour": "<update/extend only: what the code does today, with file:line>",
   "verifiableIn": "code | config | test | infra | none" }
 ```
+`changeType` is `add` in `create` mode. In `update` mode every `change`/`remove` item cites the existing
+code it alters in `currentBehaviour`, so the generator edits that place and alignment can prove it changed.
+Behaviour of the target service the solution does NOT mention is out of scope and must stay unchanged:
+list the main behaviours you saw under `preserved` (`PRS-*` ids), so a regression can be named.
 
 ### Realisation (decide it once, here)
 - `reuse`: the solution says the behaviour already exists ("already implemented", "use existing rules",
