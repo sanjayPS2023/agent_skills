@@ -19,7 +19,8 @@ re-worded between iterations makes the loop oscillate instead of converge. Preci
 ### Procedure (code alignment)
 1. Read the authorities: `Solution-In-Memory.json`, `Jira-Model.json` ACs, `Gap-Resolutions.json` (if
    present), `Additional-Instruction.json`, `Standards-Checklist.json`, `Coding-Standards.json`,
-   `Repo-Profile.json`, `FileMap.json`.
+   `Repo-Profile.json` (note its `mode`), `FileMap.json`, and the `glue-job-design` rules.
+   Also read `50-validation/Validation-Result.json` for `regressions` and `generatedTests.failed`.
 2. Read what this run changed: `40-codegen/Generated-Files.json`, confirmed against the real tree with
    `git -C <repo> status --porcelain` / `ls`.
 3. Read the PREVIOUS `Alignment-Result.json` and `Fix-Report.json` if they exist. For each previous
@@ -33,14 +34,20 @@ re-worded between iterations makes the loop oscillate instead of converge. Preci
   path you can cite hop by hop as `file:line`. Never demand a re-implementation of reused logic.
 - `realisation: config` -> check the value in the config/properties file(s), in every environment where
   it applies.
-- `realisation: infra` -> check the setup/job-definition files.
+- `realisation: infra` -> check the setup/job-definition files (every environment).
+- `changeType: change|remove` (update mode) -> the code at `currentBehaviour` no longer does the old
+  thing and now does the new one; cite both. An untouched old implementation is `missing-implementation`.
+- `preserved` (`PRS-*`) -> still behaves as before. Each entry in `Validation-Result.regressions` is a
+  `blocking` deviation of kind `regression` naming the failing test and the PRS/SIM id it protects.
+- Glue rules (`glue-job-design` checklist) -> evaluate on the files this run created or modified.
 - `realisation: operational` / `verifiableIn: none` -> never a deviation. List it under `notVerifiable`.
 - Standards -> evaluate each applicable `Standards-Checklist` item with its `verification` method, ONLY on
   files this run created or modified (unless the item is `appliesTo: component`). Legacy code is out of
   scope. Failed MANDATORY = `blocking`; failed RECOMMENDED = `warning`.
 - Structure -> every `envFiles` environment has its file; every `extensionPoints` registration needed by
   the mode is present; paths sit at the reference's level with no extra prefix; the reference's or
-  sibling's name/domain does not appear in any new file (code, docstring or comment).
+  sibling's name/domain does not appear in any new file (code, docstring or comment). In `update` mode
+  the target service's own name is of course allowed; only a SEPARATE reference service's name leaks.
 
 ### Evidence rules (before writing a deviation)
 - "Missing file": prove it with `test -f <absolute path>` (exit 1). Never report a file missing that
@@ -55,7 +62,7 @@ re-worded between iterations makes the loop oscillate instead of converge. Preci
 ### Produce
 ```json
 { "verdict": "ALIGNED | NOT_ALIGNED",
-  "deviations": [{ "id": "DEV-<ruleId>-<file-stem>", "kind": "missing-file|missing-implementation|missing-registration|structural-parity|standards|reference-name-leak|config-value",
+  "deviations": [{ "id": "DEV-<ruleId>-<file-stem>", "kind": "missing-file|missing-implementation|missing-registration|structural-parity|standards|reference-name-leak|config-value|regression|glue-runtime",
                    "severity": "blocking|warning", "file": "<repo-relative>", "line": 0,
                    "ruleId": "<SIM or standards id>", "detail": "<one-line summary>", "expected": "...", "found": "...", "evidence": "<command or file:line>",
                    "previously": "new|open" }],
