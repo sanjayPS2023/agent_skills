@@ -1,72 +1,96 @@
 ---
 name: reference-repo-profiling
-description: Locate the reference component in the cloned repo, decide create-vs-extend mode, and profile it into machine-readable conventions, extension points and the exact toolchain (Glue/Python/Spark versions, test command) every later stage relies on.
+description: Locate the reference and target Glue services in the cloned repo, decide create / extend / update mode, and profile them into machine-readable conventions, extension points and the exact toolchain (Glue/Python/Spark versions, test command) every later stage relies on.
 ---
 
 # reference-repo-profiling
 
-> Locate the reference component in the cloned repo, decide create-vs-extend mode, and profile it into machine-readable conventions, extension points and the exact toolchain (Glue/Python/Spark versions, test command) every later stage relies on.
+> Locate the reference and target Glue services in the cloned repo, decide create / extend / update mode, and profile them into machine-readable conventions, extension points and the exact toolchain (Glue/Python/Spark versions, test command) every later stage relies on.
 
-The repository is usually a monorepo, and the reference component -- named in the solution design
-(`Solution-Model.json`), not by a UI input -- normally sits several levels down inside sub-packages.
-Learn its name from the solution, FIND its folder, then profile it.
+The repository is usually a monorepo; services sit several levels down inside sub-packages. Two
+services can matter:
+- the REFERENCE service -- teaches CONVENTIONS (layout, naming, config shapes, job definition, tests).
+  Source: `Run-Inputs.referenceEtlService`, else the component the solution design names
+  (`Solution-Model.referenceComponent`).
+- the TARGET service (UPDATE only) -- the existing Glue service this run changes.
+  Source: `Run-Inputs.targetGlueService`, else the service the solution says to change.
+In `update`/`extend` mode the target IS the component being changed; when no separate reference is
+given, the target is also the reference.
 
-The reference component shows the CONVENTIONS (layout, naming, shapes) to follow where the ETL Coding
-Standards are silent. It does NOT override the standards, and it never supplies content, names or
-values for the new work (see the authority order in `workflow-run-contract`).
+The reference never overrides the ETL Coding Standards, and never supplies content, names or values for
+new work (see the authority order in `workflow-run-contract`).
 
 ### Procedure (read the repo on disk with read_file / command_line, absolute paths)
-1. LOCATE. Search the whole repo for a directory whose name is, or ends with, the reference component's
-   name. If several match, prefer the one that contains source AND tests. Record the absolute path as
-   `componentPath`. If the solution names no reference component or none is found, record that and set
-   `PARTIAL` -- never profile the repo root as a fallback.
-2. DECIDE THE MODE.
-   - `extend`: the solution adds a new variant (a new source, market, aggregator, feed, ...) to an
-     EXISTING job, or tells you to follow an existing implementation inside the same component. New
-     files go INSIDE `componentPath`, and shared modules get minimal in-place edits.
-   - `create`: the solution introduces a new, separately deployed component. New files are rooted at
-     `skeleton.parentPath`.
-   Record the sentence of the solution that decided it in `modeEvidence`.
+1. LOCATE. For each service name, search the whole repo for a directory whose name is, or ends with, it
+   (case-insensitive; also try `-`/`_` swaps). A repo-relative path given in the input is used as is.
+   If several match, prefer the one containing a Glue entrypoint (`getResolvedOptions`, `GlueContext`,
+   `awsglue`) AND tests. Record `referencePath` and, for update, `targetPath`. Never profile the repo root
+   as a fallback: if a service cannot be found, record the searches you ran and set `PARTIAL`.
+2. DECIDE THE MODE, constrained by `Run-Inputs.serviceAction`:
+   - `CREATE` -> `create`. `UPDATE` -> `extend` or `update`. `AUTO` -> any of the three.
+   - `create`: the solution introduces a new, separately deployed Glue job/service.
+   - `extend`: the solution adds a new variant (source, market, feed, table, aggregator) to an EXISTING
+     job, or says to follow an existing implementation inside the same service.
+   - `update`: the solution changes an existing job's behaviour, schema, mapping, config or job
+     definition in place.
+   Record the sentence of the solution that decided it in `modeEvidence`. If the solution contradicts
+   the user's action (e.g. CREATE but the solution only modifies an existing job), keep the user's
+   action, set `PARTIAL`, and record the contradiction under `gaps`.
+   `componentPath` = the TARGET service for `extend`/`update`, the REFERENCE service for `create`.
 3. TOOLCHAIN. Walk UPWARD from `componentPath` to the nearest governing manifest
-   (`requirements*.txt`, `pyproject.toml`, `setup.py`, `pom.xml`, `package.json`, ...). Record:
+   (`requirements*.txt`, `pyproject.toml`, `setup.py`, ...). Record:
    - `language`; `governingManifest` (absolute path); `dependencies` (pinned list, verbatim).
-   - `glueVersion` from the job's setup/IaC files (e.g. `GlueVersion`, `--glue-version`), as a TOP-LEVEL
-     string such as `"4.0"`. The validation script reads this exact key.
+   - `glueVersion` from the job's setup/IaC files (`GlueVersion`, `--glue-version`, `glue_version`), as a
+     TOP-LEVEL string such as `"4.0"`. The validation script reads this exact key.
    - `pythonVersion` and `sparkVersion` as TOP-LEVEL strings, derived from the Glue version: Glue 5.0 ->
      Python 3.11 / Spark 3.5; Glue 4.0 -> Python 3.10 / Spark 3.3; Glue 3.0 -> Python 3.7 / Spark 3.1.
      For a Python-shell job use the setup file's python version. Generated code and tests must run on
-     this version, so it is not optional.
-   - `jobType`: `glueetl` (Spark, uses `awsglue.job.Job`) or `pythonshell`, as the reference shows it.
+     this version, so it is not optional. If no Glue version is stated anywhere, record `"4.0"`/`"3.10"`
+     with `glueVersionSource: "default"` and a gap.
+   - `jobType`: `glueetl` (Spark, `awsglue.job.Job`), `pythonshell`, or `gluestreaming`, as the reference
+     shows it.
 4. TESTS. Record `tests`: `framework`, `testDir` (absolute), `importRoot` (the directory tests are run
-   from so that `import aggregators...` style imports resolve), `testCommand` (e.g.
-   `python -m pytest test -q`, run from `importRoot`), `namingPattern`, `mockingStyle` (unittest.mock,
-   moto, pytest-mock, conftest stubs of `awsglue`), `resourcesDir` (where fixture files live), and two
-   representative test files in `referenceFiles`.
-5. CONVENTIONS (exact shapes, not a summary). For each concern record the representative sibling file
-   AND the shape a generator must reproduce:
-   - config: per-market/variant config file pattern and its JSON schema (key names, nesting, types);
+   from so the package imports resolve), `testCommand` (pytest arguments run from `importRoot`, e.g.
+   `python -m pytest tests -q`), `namingPattern`, `mockingStyle` (unittest.mock, moto, pytest-mock,
+   conftest stubs of `awsglue`, local SparkSession fixture), `resourcesDir` (where fixture files live),
+   and two representative test files in `referenceFiles`. Use absolute paths.
+5. CONVENTIONS (exact shapes, not a summary). For each concern record the representative file AND the
+   shape a generator must reproduce:
+   - job entrypoint: argument parsing (`getResolvedOptions` keys), GlueContext/Job lifecycle, how config
+     is loaded, how the main transform is called, exit/commit handling;
+   - transforms: where pure transformation functions live vs I/O (readers/writers), DynamicFrame vs
+     DataFrame usage, schema definitions;
+   - config: per-variant/per-env config file pattern and its JSON schema (key names, nesting, types);
      `.properties` path, section headers EXACTLY as written (read at runtime -- do not assume a set),
      array-vs-scalar keys, key casing (kebab stays kebab);
    - per-environment files: the COMPLETE list of environments and every file each one has
      (`envFiles`: e.g. `properties/<env>.properties`, `setup/<env>_setup.json`). Later stages must
      produce one per environment, so a partial list causes "missing env config" failures;
-   - entrypoint, logging, exception, constants and registry patterns (each with its file).
-6. EXTENSION POINTS (mode `extend`). Pick an existing sibling VARIANT that is closest to the new one
-   (`siblingVariant`), then `grep -rn` its identifier across `componentPath`. Every file outside the
-   variant's own folder that mentions it is a place a new variant must also be registered (factory or
-   init module, constants, enabled-markets lists in every env `.properties`, routing in the entrypoint,
-   config files). Record each as `{ "file", "line", "what" }` in `extensionPoints`.
+   - job definition / IaC: where the Glue job is declared (setup JSON, CloudFormation, Terraform, CDK) and
+     its keys (worker type, number of workers, timeout, max retries, `--extra-py-files`,
+     `--additional-python-modules`, job bookmarks, connections);
+   - logging, exception, constants and registry patterns (each with its file).
+6. EXTENSION POINTS (mode `extend` and `update`). For `extend`, pick the existing VARIANT closest to the
+   new one (`siblingVariant`) and `grep -rn` its identifier across `componentPath`: every file outside the
+   variant's own folder that mentions it is a place a new variant must also be registered (factory/init,
+   constants, entrypoint routing, enabled lists in EVERY env `.properties`, job arguments, config). For
+   `update`, list every file that implements, configures or tests the behaviour the solution changes
+   (grep the field, table, column, rule or job-argument names the solution cites). Record each as
+   `{ "file", "line", "what" }` in `extensionPoints`.
 7. SKELETON (mode `create`). Record `skeleton` as a PATTERN with a `<COMPONENT>` placeholder:
    `parentPath` (verbatim, no invented prefix), `nesting` (e.g. `<parent>/<COMPONENT>/<COMPONENT>/`),
-   `fileKindToDir` (which LEVEL each kind of file lives at), `subPackageRule` (each concern in its own
-   sub-package -- the rule, not the sibling's domain name).
+   `fileKindToDir` (which LEVEL each kind of file lives at: entrypoint, transforms, config, properties,
+   setup/job definition, tests, test resources), `subPackageRule` (each concern in its own sub-package --
+   the rule, not the reference's domain name).
 
 ### Produce
-`Reference-Repo-Ref.json` (ingestion) or `Repo-Profile.json` (analysis) payload:
-`{ "repo", "branch", "referenceComponent", "componentPath", "mode", "modeEvidence", "siblingVariant",
-"language", "jobType", "glueVersion", "pythonVersion", "sparkVersion", "governingManifest",
-"dependencies", "layout", "naming", "configResolution", "logging", "exceptions", "tests", "envFiles",
-"extensionPoints", "skeleton", "conventions", "referenceFiles" }`.
+`Reference-Repo-Ref.json` (ingestion -- steps 1-2 and a first look at 3) or `Repo-Profile.json`
+(analysis -- every step) payload:
+`{ "repo", "branch", "serviceAction", "referenceComponent", "referencePath", "targetComponent",
+"targetPath", "componentPath", "mode", "modeEvidence", "siblingVariant", "language", "jobType",
+"glueVersion", "glueVersionSource", "pythonVersion", "sparkVersion", "governingManifest", "dependencies",
+"layout", "naming", "configResolution", "jobDefinition", "logging", "exceptions", "tests", "envFiles",
+"extensionPoints", "skeleton", "conventions", "referenceFiles", "gaps" }`.
 Every field cites the file (and line where useful) it was read from. These are patterns to follow, never
 names or content to copy into the new work.
 
